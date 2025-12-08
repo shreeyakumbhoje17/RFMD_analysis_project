@@ -1,0 +1,9 @@
+scipy
+streamlit
+altair
+scikit-learn
+vegafusion
+pandas
+numpy
+matplotlib
+pgeocode

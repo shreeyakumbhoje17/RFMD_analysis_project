@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./myapi
+      dockerfile: Dockerfile
+    container_name: rfmd-backend
+    ports:
+      - "8000:8000"
+    volumes:
+    - ./myapi/rfmdmarketing-93b202e79461.json:/app/service-account.json:ro
+
+
+
+
+
+
+  frontend:
+    build:
+      context: ./Dashboard
+      dockerfile: Dockerfile
+    container_name: rfmd-frontend
+    ports:
+      - "8080:8080"
+    environment:
+      API_URL: "http://backend:8000"
+    depends_on:
+      - backend
