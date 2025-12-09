@@ -14,13 +14,13 @@ COPY . .
 
 # Environment variable for Cloud Run port
 ENV PORT=8080
-EXPOSE $PORT
+EXPOSE 8080
 
-# Set the service account path (Cloud Run will mount the secret here)
-ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
+# Cloud Run secret mount (used by FastAPI via env)
+ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/my-backend-sa-key
 
-CMD ["sh", "-c", "uvicorn myapi:app --host 0.0.0.0 --port $PORT"]
-
+# Start FastAPI with uvicorn
+CMD ["uvicorn", "myapi:app", "--host", "0.0.0.0", "--port", "8080"]
 
 
 
