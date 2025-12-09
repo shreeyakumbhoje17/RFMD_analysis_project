@@ -5,14 +5,59 @@ import pandas as pd
 from datetime import date
 from google.cloud import bigquery
 import os
+import time
 
 # ---------- BigQuery Config ----------
-BQ_PROJECT = "rfmdmarketing"       # <--- replace with your GCP project ID
+BQ_PROJECT = "rfmdmarketing"       
 BQ_DATASET = "rfmdAnalysis"
 BQ_TABLE = "homeowners"
 
-# Initialize BigQuery client
-bq_client = bigquery.Client.from_service_account_json("/app/service-account.json")
+# ---------- Service Account Path ----------
+SERVICE_ACCOUNT_PATH = "/app/service-account.json"
+
+# ---------- BigQuery Client ----------
+bq_client = bigquery.Client.from_service_account_json(
+    SERVICE_ACCOUNT_PATH,
+    project=BQ_PROJECT
+)
+
+# ---------- Cache Settings ----------
+CACHE = {"data": None, "last_refresh": 0}
+REFRESH_INTERVAL = 15 * 24 * 60 * 60  # 15 days in seconds
+
+def load_base_df() -> pd.DataFrame:
+    """Query BigQuery and return dataframe."""
+    query = f"""
+        SELECT *
+        FROM `{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE}`
+    """
+    try:
+        df = bq_client.query(query).to_dataframe()
+        df.columns = [c.replace(" ", "_") for c in df.columns]
+
+        # Parse dates
+        if "first_transaction" in df.columns:
+            df["first_transaction"] = pd.to_datetime(
+                df["first_transaction"], errors="coerce"
+            ).dt.date
+
+        if "last_transaction" in df.columns:
+            df["last_transaction"] = pd.to_datetime(
+                df["last_transaction"], errors="coerce"
+            ).dt.date
+
+        return df
+    except Exception as e:
+        print(f"Error loading data from BigQuery: {e}")
+        return pd.DataFrame()
+
+def get_cached_data():
+    """Return cached dataset, refresh if interval exceeded."""
+    now = time.time()
+    if CACHE["data"] is None or now - CACHE["last_refresh"] > REFRESH_INTERVAL:
+        CACHE["data"] = load_base_df()
+        CACHE["last_refresh"] = now
+    return CACHE["data"]
 
 # ---------- Pydantic Model ----------
 class Homeowner(BaseModel):
@@ -35,38 +80,6 @@ class Homeowner(BaseModel):
     sub_region: Optional[str]
     region: Optional[str]
 
-# ---------- Load Data ----------
-def load_base_df() -> pd.DataFrame:
-    query = f"""
-        SELECT *
-        FROM `{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE}`
-    """
-    try:
-        df = bq_client.query(query).to_dataframe()
-
-        # Fix inconsistent column names
-        df.columns = [c.replace(" ", "_") for c in df.columns]
-
-        # Parse dates
-        if "first_transaction" in df.columns:
-            df["first_transaction"] = pd.to_datetime(
-                df["first_transaction"], errors="coerce"
-            ).dt.date
-
-        if "last_transaction" in df.columns:
-            df["last_transaction"] = pd.to_datetime(
-                df["last_transaction"], errors="coerce"
-            ).dt.date
-
-        return df
-
-    except Exception as e:
-        print(f"Error loading data from BigQuery: {e}")
-        return pd.DataFrame()
-
-# Load once at startup
-BASE_DF = load_base_df()
-
 # ---------- FastAPI App ----------
 app = FastAPI()
 
@@ -80,49 +93,43 @@ def root():
 @app.get("/homeowners", response_model=List[Homeowner])
 def get_homeowners():
     try:
-        df = BASE_DF.copy()
-        df = df.where(pd.notnull(df), None)   # convert NaN → None
+        df = get_cached_data()
+        df = df.where(pd.notnull(df), None)  # convert NaN → None
         return df.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # =============================================================
-# 2) KPI CARD DATA (Row 1)
+# 2) KPI CARD DATA
 # =============================================================
 @app.get("/homeowners/kpis")
 def get_kpis():
-    df = BASE_DF.copy()
-
+    df = get_cached_data()
     return {
         "total_customers": len(df),
         "avg_rfmd": round(df["RFMD_score"].mean(), 2),
         "avg_monetary": round(df["monetary"].mean(), 2),
         "avg_frequency": round(df["frequency"].mean(), 2),
-        "top_trade": df["Trade"].value_counts().idxmax(),
-        "top_region": df["region"].value_counts().idxmax()
+        "top_trade": df["Trade"].value_counts().idxmax() if not df.empty else "N/A",
+        "top_region": df["region"].value_counts().idxmax() if not df.empty else "N/A"
     }
 
 # =============================================================
-# 3) TOP 10 (Row 2 - Left Table)
+# 3) TOP 10 CUSTOMERS
 # =============================================================
 @app.get("/homeowners/top10")
 def get_top10():
-    df = BASE_DF.copy()
+    df = get_cached_data()
     df_clean = df.drop(columns=["area"], errors="ignore")
     top10 = df_clean.sort_values("RFMD_score", ascending=False).head(10)
     return top10.to_dict(orient="records")
 
 # =============================================================
-# 4) RADAR CHART DATA (Row 2 - Right)
+# 4) RADAR CHART DATA
 # =============================================================
 @app.get("/homeowners/radar")
 def get_radar(segment: str = None):
-    """
-    Returns aggregated R/F/M/D scores.
-    If segment is provided → return that segment's averages.
-    If not → return mean across all segments.
-    """
-    df = BASE_DF.copy()
+    df = get_cached_data()
     grouped = df.groupby("segment")[["R_score", "F_score", "M_score", "D_score"]].mean()
 
     if segment and segment in grouped.index:
@@ -141,11 +148,11 @@ def get_radar(segment: str = None):
     }
 
 # =============================================================
-# 5) REGION-FILTERED TRADE COUNTS (Row 3 - Right Chart)
+# 5) REGION-FILTERED TRADE COUNTS
 # =============================================================
 @app.get("/homeowners/tradecounts")
 def get_tradecounts(region: str = None, sub_region: str = None):
-    df = BASE_DF.copy()
+    df = get_cached_data()
 
     if region and region != "All Regions":
         df = df[df["region"] == region]
@@ -159,28 +166,28 @@ def get_tradecounts(region: str = None, sub_region: str = None):
     return trade_counts.to_dict(orient="records")
 
 # =============================================================
-# 6) SUMMARY BOX (Row 3 - Left)
+# 6) SUMMARY BOX
 # =============================================================
 @app.get("/homeowners/summary")
 def get_summary():
-    df = BASE_DF.copy()
+    df = get_cached_data()
 
     total_customers = len(df)
     avg_rfmd = round(df["RFMD_score"].mean(), 2)
-    top_trade = df["Trade"].value_counts().idxmax()
-    top_region = df["region"].value_counts().idxmax()
+    top_trade = df["Trade"].value_counts().idxmax() if not df.empty else "N/A"
+    top_region = df["region"].value_counts().idxmax() if not df.empty else "N/A"
     avg_monetary = round(df["monetary"].mean(), 2)
     avg_frequency = round(df["frequency"].mean(), 2)
 
     # Best segment based on RFMD
     seg_scores = df.groupby("segment")["RFMD_score"].mean().sort_values(ascending=False)
-    best_segment = seg_scores.index[0]
-    best_segment_score = round(seg_scores.iloc[0], 2)
+    best_segment = seg_scores.index[0] if not seg_scores.empty else "N/A"
+    best_segment_score = round(seg_scores.iloc[0], 2) if not seg_scores.empty else 0
 
     # Highest revenue region
     reg_scores = df.groupby("region")["monetary"].sum().sort_values(ascending=False)
-    best_region_rev = reg_scores.index[0]
-    best_region_rev_val = round(reg_scores.iloc[0], 2)
+    best_region_rev = reg_scores.index[0] if not reg_scores.empty else "N/A"
+    best_region_rev_val = round(reg_scores.iloc[0], 2) if not reg_scores.empty else 0
 
     return {
         "total_customers": total_customers,
@@ -194,4 +201,3 @@ def get_summary():
         "best_region_revenue": best_region_rev,
         "best_region_revenue_value": best_region_rev_val
     }
-
