@@ -19,8 +19,8 @@ EXPOSE $PORT
 # Set the service account path (Cloud Run will mount the secret here)
 ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
 
-# Use uvicorn to run FastAPI
-CMD ["uvicorn", "myapi:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn myapi:app --host 0.0.0.0 --port $PORT"]
+
 
 
 

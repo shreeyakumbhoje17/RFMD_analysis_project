@@ -8,18 +8,21 @@ import os
 import time
 
 # ---------- BigQuery Config ----------
-BQ_PROJECT = "rfmdmarketing"       
+BQ_PROJECT = "rfmdmarketing"
 BQ_DATASET = "rfmdAnalysis"
 BQ_TABLE = "homeowners"
 
-SERVICE_ACCOUNT_PATH = os.getenv(
-    "GOOGLE_APPLICATION_CREDENTIALS", "/app/service-account.json"
+# ---------- Service Account Path ----------
+# Uses the secret mounted via Cloud Run
+SERVICE_ACCOUNT_PATH = os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS", "/secrets/my-backend-sa-key"
 )
+
+# ---------- BigQuery Client ----------
 bq_client = bigquery.Client.from_service_account_json(
     SERVICE_ACCOUNT_PATH,
     project=BQ_PROJECT
 )
-
 
 # ---------- Cache Settings ----------
 CACHE = {"data": None, "last_refresh": 0}
