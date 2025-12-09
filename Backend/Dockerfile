@@ -1,24 +1,30 @@
 # Use official Python 3.11 slim image
 FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements and install dependencies
 COPY requirements.txt .
-
-# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir google-cloud-bigquery db-dtypes
 
-# Copy backend code
+# Copy the backend code
 COPY . .
 
-# Use the port provided by Cloud Run
+# Environment variable for Cloud Run port
 ENV PORT=8080
 EXPOSE $PORT
 
-# Run Uvicorn pointing to the module inside the Backend folder
-CMD ["sh", "-c", "uvicorn myapi:app --host 0.0.0.0 --port $PORT"]
+# Set the service account path (Cloud Run will mount the secret here)
+ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
+
+# Use uvicorn to run FastAPI
+CMD ["uvicorn", "myapi:app", "--host", "0.0.0.0", "--port", "8080"]
+
+
+
+
 
 
 
