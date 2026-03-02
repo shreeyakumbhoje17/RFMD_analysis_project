@@ -6,7 +6,7 @@ import os
 # ------------------------------------------------
 # Base API URL (from environment variable if set)
 # ------------------------------------------------
-API_URL = os.environ.get("API_URL", "http://backend:8000")
+API_URL = os.environ.get("API_URL", "http://127.0.0.1:8001")
 
 
 

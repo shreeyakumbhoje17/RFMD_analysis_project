@@ -6,6 +6,7 @@ from datetime import date
 from google.cloud import bigquery
 import os
 import time
+from fastapi.middleware.cors import CORSMiddleware
 
 # ---------- BigQuery Config ----------
 BQ_PROJECT = os.environ.get("BQ_PROJECT", "rfmdmarketing")
@@ -80,6 +81,13 @@ class Homeowner(BaseModel):
 
 # ---------- FastAPI App ----------
 app = FastAPI(title="RFMD API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5174"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def root():
